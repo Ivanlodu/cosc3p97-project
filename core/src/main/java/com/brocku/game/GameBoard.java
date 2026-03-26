@@ -9,8 +9,6 @@ public class GameBoard {
 
     private Tile[][] grid;
     private Random random;
-
-    // The first tile the player tapped (waiting for a second tap to swap)
     private Tile selectedTile;
 
     public GameBoard() {
@@ -19,15 +17,8 @@ public class GameBoard {
         fillBoard();
     }
 
-    // ---------------------------------------------------------------
-    // Board initialisation
-    // ---------------------------------------------------------------
-
-    /** Fill every cell with a random tile, re-rolling any that would
-     *  immediately create a 3-in-a-row so the board starts clean. */
     private void fillBoard() {
         Tile.TileType[] types = Tile.TileType.values();
-
         for (int x = 0; x < COLS; x++) {
             for (int y = 0; y < ROWS; y++) {
                 Tile.TileType type;
@@ -39,71 +30,55 @@ public class GameBoard {
         }
     }
 
-    /** Returns true if placing [type] at (x,y) would create a match
-     *  with the two tiles already placed to its left or below it. */
     private boolean wouldMatch(int x, int y, Tile.TileType type) {
-        // Check horizontal: two tiles to the left
         if (x >= 2
             && grid[x-1][y].getType() == type
             && grid[x-2][y].getType() == type) return true;
-        // Check vertical: two tiles below
         if (y >= 2
             && grid[x][y-1].getType() == type
             && grid[x][y-2].getType() == type) return true;
         return false;
     }
 
-    // ---------------------------------------------------------------
-    // Input handling — called from GameScreen on touch/tap
-    // ---------------------------------------------------------------
-
-    /**
-     * Called when the player taps a tile at grid position (x, y).
-     * First tap  → selects the tile.
-     * Second tap → attempts a swap if the tiles are adjacent,
-     *              or changes selection if they are not.
-     *
-     * @return true if a swap was attempted (valid or not)
-     */
     public boolean handleTap(int x, int y) {
         if (!inBounds(x, y)) return false;
 
         Tile tapped = grid[x][y];
 
         if (selectedTile == null) {
-            // First tap: select this tile
             tapped.setSelected(true);
             selectedTile = tapped;
             return false;
         }
 
         if (selectedTile == tapped) {
-            // Tapped the same tile: deselect
             tapped.setSelected(false);
             selectedTile = null;
             return false;
         }
 
         if (isAdjacent(selectedTile, tapped)) {
-            // Valid swap target — deselect and swap
             selectedTile.setSelected(false);
             swap(selectedTile, tapped);
+
+            // If the swap creates no match, reverse it
+            if (!findAndMarkMatches()) {
+                swap(tapped, selectedTile); // swap back
+            } else {
+                // Clear the marks — GameScreen's while loop will re-detect them
+                clearMatches();
+            }
+
             selectedTile = null;
             return true;
         }
 
-        // Not adjacent: move selection to new tile
         selectedTile.setSelected(false);
         tapped.setSelected(true);
         selectedTile = tapped;
         return false;
     }
 
-    // ---------------------------------------------------------------
-    // Swap
-    // ---------------------------------------------------------------
-
-    /** Swap two tiles in the grid (and update their stored positions). */
     public void swap(Tile a, Tile b) {
         int ax = a.getGridX(), ay = a.getGridY();
         int bx = b.getGridX(), by = b.getGridY();
@@ -115,37 +90,72 @@ public class GameBoard {
         b.setGridX(ax); b.setGridY(ay);
     }
 
-    // ---------------------------------------------------------------
-    // Match detection  (TODO for your teammate)
-    // ---------------------------------------------------------------
-
-    /**
-     * Scans the whole board and marks every tile that is part of a
-     * 3-or-more match.
-     *
-     * TODO: implement this in the second half of development.
-     * Hint: iterate rows checking horizontal runs, then columns for vertical.
-     *
-     * @return true if at least one match was found
-     */
     public boolean findAndMarkMatches() {
-        // Placeholder — replace with real implementation
-        return false;
+        boolean found = false;
+
+        // Horizontal runs
+        for (int y = 0; y < ROWS; y++) {
+            for (int x = 0; x < COLS - 2; x++) {
+                Tile.TileType t = grid[x][y].getType();
+                if (t == grid[x+1][y].getType() && t == grid[x+2][y].getType()) {
+                    int end = x + 2;
+                    while (end + 1 < COLS && grid[end+1][y].getType() == t) end++;
+                    for (int i = x; i <= end; i++) grid[i][y].setMatched(true);
+                    found = true;
+                    x = end;
+                }
+            }
+        }
+
+        // Vertical runs
+        for (int x = 0; x < COLS; x++) {
+            for (int y = 0; y < ROWS - 2; y++) {
+                Tile.TileType t = grid[x][y].getType();
+                if (t == grid[x][y+1].getType() && t == grid[x][y+2].getType()) {
+                    int end = y + 2;
+                    while (end + 1 < ROWS && grid[x][end+1].getType() == t) end++;
+                    for (int i = y; i <= end; i++) grid[x][i].setMatched(true);
+                    found = true;
+                    y = end;
+                }
+            }
+        }
+
+        return found;
     }
 
-    /**
-     * Removes all tiles marked as matched and lets tiles above fall
-     * down to fill the gaps, then refills empty cells at the top.
-     *
-     * TODO: implement this in the second half of development.
-     */
     public void removeMatchesAndRefill() {
-        // Placeholder — replace with real implementation
+        Tile.TileType[] types = Tile.TileType.values();
+        for (int x = 0; x < COLS; x++) {
+            int writeY = 0;
+            for (int y = 0; y < ROWS; y++) {
+                if (!grid[x][y].isMatched()) {
+                    grid[x][writeY] = grid[x][y];
+                    grid[x][writeY].setGridY(writeY);
+                    writeY++;
+                }
+            }
+            while (writeY < ROWS) {
+                Tile.TileType type = types[random.nextInt(types.length)];
+                grid[x][writeY] = new Tile(type, x, writeY);
+                writeY++;
+            }
+        }
     }
 
-    // ---------------------------------------------------------------
-    // Helpers
-    // ---------------------------------------------------------------
+    private void clearMatches() {
+        for (int x = 0; x < COLS; x++)
+            for (int y = 0; y < ROWS; y++)
+                grid[x][y].setMatched(false);
+    }
+
+    public int countMatched() {
+        int count = 0;
+        for (int x = 0; x < COLS; x++)
+            for (int y = 0; y < ROWS; y++)
+                if (grid[x][y].isMatched()) count++;
+        return count;
+    }
 
     public boolean isAdjacent(Tile a, Tile b) {
         int dx = Math.abs(a.getGridX() - b.getGridX());
@@ -157,11 +167,6 @@ public class GameBoard {
         return x >= 0 && x < COLS && y >= 0 && y < ROWS;
     }
 
-    public Tile getTile(int x, int y) {
-        return grid[x][y];
-    }
-
-    public Tile getSelectedTile() {
-        return selectedTile;
-    }
+    public Tile getTile(int x, int y) { return grid[x][y]; }
+    public Tile getSelectedTile()     { return selectedTile; }
 }
